@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Space War Mobile</title>
+    <style>
+        body { margin: 0; background: #050505; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 80%; }
+        input { padding: 15px; width: 80%; margin: 10px; border-radius: 10px; border: none; font-size: 1.2rem; }
+        button#joinBtn { padding: 15px 30px; background: #00ffcc; border: none; border-radius: 10px; font-weight: bold; font-size: 1.2rem; }
+        
+        /* Mobile Controls */
+        .controls { position: absolute; bottom: 20px; width: 100%; display: none; justify-content: space-between; padding: 0 30px; box-sizing: border-box; pointer-events: none; }
+        .joy { width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); pointer-events: auto; }
+        .fire { width: 80px; height: 80px; background: rgba(255,0,0,0.4); border-radius: 50%; border: 2px solid red; pointer-events: auto; }
+        #roomLabel { position: absolute; top: 10px; left: 10px; color: #00ffcc; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>🚀 GALAXY WARS</h1>
+        <input type="text" id="roomInput" placeholder="Room Code">
+        <button id="joinBtn" onclick="joinGame()">JOIN ROOM</button>
+    </div>
+
+    <div id="roomLabel"></div>
+
+    <div class="controls" id="mobileUI">
+        <div class="joy" id="joystick"></div>
+        <div class="fire" id="fireBtn"></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let myId, roomCode, players = {}, bullets = [], powerups = [];
+        let myState = { x: Math.random()*500, y: Math.random()*500, angle: 0 };
+        let joystickActive = false;
+        let joyAngle = 0;
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        function joinGame() {
+            roomCode = document.getElementById('roomInput').value;
+            if(!roomCode) return;
+            document.getElementById('ui').style.display = 'none';
+            document.getElementById('mobileUI').style.display = 'flex';
+            document.getElementById('roomLabel').innerText = "Room: " + roomCode;
+            socket.emit('joinRoom', roomCode);
+            requestAnimationFrame(gameLoop);
+        }
+
+        socket.on('init', id => myId = id);
+        socket.on('gameState', data => {
+            players = data.players;
+            bullets = data.bullets;
+            powerups = data.powerups;
+        });
+
+        // --- Mobile Touch Controls ---
+        const joy = document.getElementById('joystick');
+        const fire = document.getElementById('fireBtn');
+
+        joy.addEventListener('touchstart', () => joystickActive = true);
+        joy.addEventListener('touchend', () => joystickActive = false);
+        joy.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            const rect = joy.getBoundingClientRect();
+            const centerX = rect.left + rect.width/2;
+            const centerY = rect.top + rect.height/2;
+            joyAngle = Math.atan2(touch.clientY - centerY, touch.clientX - centerX);
+        });
+
+        fire.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            socket.emit('shoot', { x: myState.x, y: myState.y, angle: myState.angle, owner: myId });
+        });
+
+        // --- Desktop Keyboard Support ---
+        const keys = {};
+        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeyup = (e) => keys[e.code] = false;
+
+        function gameLoop() {
+            if (myId && players[myId]) {
+                // Desktop Movement
+                if(keys['KeyW']) { myState.x += Math.cos(myState.angle)*5; myState.y += Math.sin(myState.angle)*5; }
+                if(keys['KeyA']) myState.angle -= 0.07;
+                if(keys['KeyD']) myState.angle += 0.07;
+                if(keys['Space']) {
+                    socket.emit('shoot', { x: myState.x, y: myState.y, angle: myState.angle, owner: myId });
+                    keys['Space'] = false;
+                }
+
+                // Mobile Movement
+                if (joystickActive) {
+                    myState.angle = joyAngle;
+                    myState.x += Math.cos(joyAngle) * 5;
+                    myState.y += Math.sin(joyAngle) * 5;
+                }
+
+                socket.emit('update', myState);
+            }
+
+            // Draw Background
+            ctx.fillStyle = '#050505';
+            ctx.fillRect(0,0, canvas.width, canvas.height);
+
+            // Draw Powerups
+            powerups.forEach(p => {
+                ctx.fillStyle = '#00ffcc';
+                ctx.fillRect(p.x, p.y, 15, 15);
+            });
+
+            // Draw Bullets
+            bullets.forEach(b => {
+                ctx.fillStyle = 'red';
+                ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI*2); ctx.fill();
+            });
+
+            // Draw Ships
+            for (let id in players) {
+                const p = players[id];
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+                ctx.strokeStyle = p.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(15, 0); ctx.lineTo(-10, 10); ctx.lineTo(-10, -10);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.restore();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
